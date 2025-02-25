@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h2>Create Referral</h2>
+    <button onclick="createReferral()">Create Test Referral</button>
+
+    <h2>Get All Referrals</h2>
+    <button onclick="getReferrals()">Get Referrals</button>
+    <div id="results"></div>
+
+    <script>
+        async function createReferral() {
+            try {
+                const response = await fetch('http://localhost:5000/api/referrals', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: 'John Doe',
+                        email: 'john@example.com',
+                        phone: '1234567890',
+                        company: 'Test Company',
+                        message: 'Test message'
+                    })
+                });
+                const data = await response.json();
+                alert('Referral created: ' + JSON.stringify(data));
+            } catch (error) {
+                alert('Error: ' + error);
+            }
+        }
+
+        async function getReferrals() {
+            try {
+                const response = await fetch('http://localhost:5000/api/referrals');
+                const data = await response.json();
+                document.getElementById('results').innerHTML = 
+                    '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                alert('Error: ' + error);
+            }
+        }
+    </script>
+</body>
+</html> 
