@@ -13,14 +13,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Referrer model to track people who refer others
+model Referrer {
+  id            Int       @id @default(autoincrement())
+  name          String
+  email         String    @unique
+  phone         String?
+  referralCount Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  referrals     Referral[] // Relation to track all referrals made by this referrer
+}
+
+// Referral model to track individual referrals
 model Referral {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String
-  phone     String?
-  company   String?
-  message   String   @db.Text
-  status    String   @default("pending")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  // Referee (person being referred) details
+  name         String
+  email        String
+  phone        String?
+  fieldOfWork  String
+  program      String
+  status       String   @default("pending")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relation to referrer
+  referrerId   Int
+  referrer     Referrer @relation(fields: [referrerId], references: [id])
+
+  @@index([referrerId])
 }

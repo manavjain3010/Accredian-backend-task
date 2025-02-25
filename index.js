@@ -21,47 +21,172 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+// Add this after creating the prisma client
+prisma.$connect()
+  .then(() => console.log('Database connected successfully'))
+  .catch((err) => console.error('Database connection error:', err));
+
 // Referral submission endpoint
 app.post('/api/referrals', async (req, res) => {
   try {
-    const { name, email, phone, company, message } = req.body;
+    console.log('Received referral data:', req.body);
+
+    const {
+      referrerName,
+      referrerEmail,
+      referrerPhone,
+      refereeName,
+      refereeEmail,
+      refereePhone,
+      fieldOfWork,
+      program
+    } = req.body;
+
+    // Log the extracted data
+    console.log('Extracted data:', {
+      referrerName,
+      referrerEmail,
+      referrerPhone,
+      refereeName,
+      refereeEmail,
+      refereePhone,
+      fieldOfWork,
+      program
+    });
 
     // Validate required fields
-    if (!name || !email || !message) {
-      return res.status(400).json({ error: 'Name, email, and message are required fields' });
+    const requiredFields = {
+      referrerName: 'Referrer Name',
+      referrerEmail: 'Referrer Email',
+      refereeName: 'Referee Name',
+      refereeEmail: 'Referee Email',
+      fieldOfWork: 'Field of Work',
+      program: 'Program'
+    };
+
+    const missingFields = Object.entries(requiredFields)
+      .filter(([key]) => !req.body[key])
+      .map(([_, label]) => label);
+
+    if (missingFields.length > 0) {
+      console.log('Missing fields:', missingFields);
+      return res.status(400).json({
+        error: `The following fields are required: ${missingFields.join(', ')}`
+      });
     }
 
-    // Create referral in database
-    const referral = await prisma.referral.create({
-      data: {
-        name,
-        email,
-        phone,
-        company,
-        message
+    // Validate email format
+    const emailRegex = /\S+@\S+\.\S+/;
+    if (!emailRegex.test(referrerEmail) || !emailRegex.test(refereeEmail)) {
+      console.log('Invalid email format');
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Transaction to handle both referrer and referral creation/update
+    const result = await prisma.$transaction(async (prisma) => {
+      try {
+        // Find or create referrer
+        let referrer = await prisma.referrer.findUnique({
+          where: { email: referrerEmail }
+        });
+
+        console.log('Existing referrer:', referrer);
+
+        if (!referrer) {
+          referrer = await prisma.referrer.create({
+            data: {
+              name: referrerName,
+              email: referrerEmail,
+              phone: referrerPhone,
+              referralCount: 1
+            }
+          });
+          console.log('Created new referrer:', referrer);
+        } else {
+          // Update existing referrer's count and details
+          referrer = await prisma.referrer.update({
+            where: { id: referrer.id },
+            data: {
+              referralCount: { increment: 1 },
+              name: referrerName,
+              phone: referrerPhone
+            }
+          });
+          console.log('Updated existing referrer:', referrer);
+        }
+
+        // Create the referral
+        const referral = await prisma.referral.create({
+          data: {
+            name: refereeName,
+            email: refereeEmail,
+            phone: refereePhone,
+            fieldOfWork,
+            program,
+            referrerId: referrer.id
+          },
+          include: {
+            referrer: true
+          }
+        });
+
+        console.log('Created new referral:', referral);
+        return { referrer, referral };
+      } catch (error) {
+        console.error('Transaction error:', error);
+        throw error;
       }
     });
 
-    // Send email notification
-    const mailOptions = {
+    // Send email notification to both admin and referee
+    const adminMailOptions = {
       from: process.env.EMAIL_USER,
       to: process.env.ADMIN_EMAIL,
       subject: 'New Referral Submission',
       html: `
         <h2>New Referral Received</h2>
-        <p><strong>Name:</strong> ${name}</p>
-        <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
-        <p><strong>Company:</strong> ${company || 'Not provided'}</p>
-        <p><strong>Message:</strong> ${message}</p>
+        <h3>Referrer Details:</h3>
+        <p><strong>Name:</strong> ${result.referrer.name}</p>
+        <p><strong>Email:</strong> ${result.referrer.email}</p>
+        <p><strong>Phone:</strong> ${result.referrer.phone || 'Not provided'}</p>
+        <p><strong>Total Referrals:</strong> ${result.referrer.referralCount}</p>
+        <h3>Referee Details:</h3>
+        <p><strong>Name:</strong> ${result.referral.name}</p>
+        <p><strong>Email:</strong> ${result.referral.email}</p>
+        <p><strong>Phone:</strong> ${result.referral.phone || 'Not provided'}</p>
+        <p><strong>Field of Work:</strong> ${result.referral.fieldOfWork}</p>
+        <p><strong>Program:</strong> ${result.referral.program}</p>
       `
     };
 
-    await transporter.sendMail(mailOptions);
+    // Email to referee
+    const refereeMailOptions = {
+      from: process.env.EMAIL_USER,
+      to: result.referral.email,
+      subject: 'You have been referred to our program',
+      html: `
+        <h2>Welcome to Our Program!</h2>
+        <p>Hello ${result.referral.name},</p>
+        <p>You have been referred to our ${result.referral.program} program by ${result.referrer.name}.</p>
+        <p>We're excited to have you join us! Our team will review your details and contact you soon.</p>
+        <h3>Program Details:</h3>
+        <p><strong>Selected Program:</strong> ${result.referral.program}</p>
+        <p><strong>Your Field of Work:</strong> ${result.referral.fieldOfWork}</p>
+        <br>
+        <p>If you have any questions, feel free to reach out to us.</p>
+        <p>Best regards,<br>The Team</p>
+      `
+    };
+
+    // Send both emails
+    await Promise.all([
+      transporter.sendMail(adminMailOptions),
+      transporter.sendMail(refereeMailOptions)
+    ]);
 
     res.status(201).json({
       message: 'Referral submitted successfully',
-      referral
+      data: result
     });
   } catch (error) {
     console.error('Error processing referral:', error);
@@ -73,6 +198,9 @@ app.post('/api/referrals', async (req, res) => {
 app.get('/api/referrals', async (req, res) => {
   try {
     const referrals = await prisma.referral.findMany({
+      include: {
+        referrer: true
+      },
       orderBy: {
         createdAt: 'desc'
       }
@@ -89,7 +217,10 @@ app.get('/api/referrals/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const referral = await prisma.referral.findUnique({
-      where: { id: parseInt(id) }
+      where: { id: parseInt(id) },
+      include: {
+        referrer: true
+      }
     });
     
     if (!referral) {
@@ -99,6 +230,34 @@ app.get('/api/referrals/:id', async (req, res) => {
     res.json(referral);
   } catch (error) {
     console.error('Error fetching referral:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get referrer statistics
+app.get('/api/referrers/:id/stats', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const referrer = await prisma.referrer.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        referrals: {
+          select: {
+            status: true,
+            program: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+    
+    if (!referrer) {
+      return res.status(404).json({ error: 'Referrer not found' });
+    }
+    
+    res.json(referrer);
+  } catch (error) {
+    console.error('Error fetching referrer stats:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
