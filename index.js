@@ -26,6 +26,11 @@ prisma.$connect()
   .then(() => console.log('Database connected successfully'))
   .catch((err) => console.error('Database connection error:', err));
 
+
+app.get('/', (req, res) => {
+    res.send('Hello World')
+  })
+
 // Referral submission endpoint
 app.post('/api/referrals', async (req, res) => {
   try {
